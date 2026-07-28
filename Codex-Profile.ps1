@@ -70,6 +70,47 @@ function Get-ProfilePaths([string]$Name, [string]$Root) {
     }
 }
 
+function Initialize-IsolatedProfileConfig([string]$CodexHome) {
+    $configPath = Join-Path $CodexHome 'config.toml'
+    $contents = if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+        [System.IO.File]::ReadAllText($configPath)
+    }
+    else {
+        ''
+    }
+
+    $assignmentPattern = '(?m)^[ \t]*cli_auth_credentials_store[ \t]*=[ \t]*(?<value>[^#\r\n]+)'
+    $assignments = [regex]::Matches($contents, $assignmentPattern)
+
+    if ($assignments.Count -gt 1) {
+        throw "Isolated profile config contains multiple cli_auth_credentials_store settings: $configPath"
+    }
+
+    if ($assignments.Count -eq 1) {
+        $configuredValue = $assignments[0].Groups['value'].Value.Trim()
+        if ($configuredValue -notin @('"file"', "'file'")) {
+            throw "Isolated profiles require cli_auth_credentials_store = `"file`", but $configPath contains: $configuredValue"
+        }
+        return
+    }
+
+    $newline = [Environment]::NewLine
+    $setting = 'cli_auth_credentials_store = "file"'
+    $updatedContents = if ([string]::IsNullOrEmpty($contents)) {
+        $setting + $newline
+    }
+    else {
+        $setting + $newline + $newline + $contents
+    }
+
+    [System.IO.File]::WriteAllText(
+        $configPath,
+        $updatedContents,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    Write-Host "  Added file-based credential isolation to: $configPath"
+}
+
 function Show-LauncherHelp {
     @"
 Codex profile launcher
@@ -169,6 +210,7 @@ if ($profileConfig.Mode -eq 'Native') {
 elseif ($profileConfig.Mode -eq 'Isolated') {
     $paths = Get-ProfilePaths -Name $Profile -Root $ProfilesRoot
     New-Item -ItemType Directory -Force -Path $paths.CodexHome, $paths.WebData | Out-Null
+    Initialize-IsolatedProfileConfig -CodexHome $paths.CodexHome
 
     $oldCodexHome = $env:CODEX_HOME
     try {

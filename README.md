@@ -47,6 +47,14 @@ The isolated profile defaults to:
 
 `CODEX_HOME` separates Codex authentication, configuration, sessions, databases, skills, and plugins. Chromium `--user-data-dir` separates cookies, local storage, cache, crash data, and desktop web state.
 
+For every `Isolated` profile, the launcher also ensures its `codex-home\config.toml` contains:
+
+```toml
+cli_auth_credentials_store = "file"
+```
+
+This forces Codex to use the profile-local `auth.json` instead of a shared Windows credential store. Existing configuration is preserved. If an isolated profile explicitly selects another credential store, the launcher stops with an error instead of silently overriding it. Native profiles are not changed.
+
 ## Change the profiles
 
 Edit the configuration block near the beginning of `Codex-Profile.ps1`:
@@ -85,6 +93,7 @@ The native/default process is deliberately not shown because it has no explicit 
 
 - This was verified with Windows package `OpenAI.Codex_26.707.3748.0_x64` but is not a documented, supported multi-profile feature. A future update could change argument handling, environment handling, authentication, or storage layout.
 - Windows still sees every process as the same installed package. Package-scoped settings, notifications, `codex://` protocol activation, shell integration, and OS credential storage may remain shared or route to the wrong profile.
+- Isolated profiles force Codex authentication into their profile-local `auth.json`; keep that file private and never commit it.
 - If browser sign-in returns to the wrong window, temporarily close the other profile, finish sign-in, and reopen both.
 - Do not copy credentials between profile folders or place profile data in Git, OneDrive, Dropbox, shared folders, or network drives.
 - Do not run the same isolated profile concurrently against the same files. Chromium and SQLite expect single-profile ownership.
