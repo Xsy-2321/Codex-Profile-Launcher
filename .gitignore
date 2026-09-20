@@ -1,0 +1,21 @@
+# Local Codex profile data and credentials
+auth.json
+**/auth.json
+CodexProfiles/
+**/CodexProfiles/
+codex-home/
+**/codex-home/
+web-data/
+**/web-data/
+notification-routing.jsonl
+**/notification-routing.jsonl
+*.before-fresh-start.json
+
+# Locally built application runtimes
+profile-runtime/
+**/profile-runtime/
+
+# Temporary launcher and sandbox test output
+config-test-*/
+sandbox-test-*/
+*.log

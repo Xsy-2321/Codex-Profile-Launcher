@@ -1,105 +1,84 @@
 # Codex Profile Launcher for Windows
 
-`Codex-Profile.ps1` launches the normal Codex desktop profile alongside separately isolated profiles.
+This is a personal fork of [phoem/Codex-Profile-Launcher](https://github.com/phoem/Codex-Profile-Launcher), extended to run a normal Codex account alongside an isolated Personal account on Windows.
 
-The current configuration is:
+[中文说明 / Chinese documentation](README.zh-CN.md)
 
-| Profile | Mode | Behavior |
-| --- | --- | --- |
-| `Work` | Native, default | Launches Codex normally, with no special arguments or environment override. |
-| `Personal` | Isolated | Uses separate Codex backend state and Chromium web state. |
+> This is an unofficial, update-sensitive workaround that relies on the internal structure of the Codex Windows app. It is not an official multi-account feature.
 
-Run `Codex-Profile.ps1 -h` or `Codex-Profile.ps1 --help` to see the active configuration.
+## Features in this fork
 
-## Usage
+- Keeps `Work` on the normal installed Codex state.
+- Runs `Personal` with separate Codex, Chromium, and Electron data directories.
+- Builds a profile-owned copy of the installed app without modifying the original WindowsApps installation.
+- Uses file-based credentials and an isolated unelevated Windows sandbox configuration.
+- Gives Personal its own notification identity, Start Menu entry, and activation registration.
+- Reuses an existing Personal window instead of launching duplicate instances.
+- Handles missing AppX discovery, restricted WMI process inspection, and incompatible app updates with safe fallbacks.
+- Includes runtime integrity, launcher configuration, and sandbox permission tests.
 
-With no arguments, the launcher starts the configured default (`Work`):
+## Requirements
 
-```powershell
-.\Codex-Profile.ps1
-```
+- Windows with the Codex desktop app installed.
+- PowerShell.
+- `node.exe` available on `PATH` for the first Personal runtime build.
 
-These are equivalent:
-
-```powershell
-.\Codex-Profile.ps1 Work
-.\Codex-Profile.ps1 -Profile Work
-```
-
-Launch the isolated personal profile:
-
-```powershell
-.\Codex-Profile.ps1 Personal
-```
-
-If execution policy blocks the script, use:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Codex-Profile.ps1 Personal
-```
-
-The isolated profile defaults to:
+The launcher does not copy or commit account data. Personal data remains under:
 
 ```text
 %LOCALAPPDATA%\CodexProfiles\personal\codex-home
 %LOCALAPPDATA%\CodexProfiles\personal\web-data
 ```
 
-`CODEX_HOME` separates Codex authentication, configuration, sessions, databases, skills, and plugins. Chromium `--user-data-dir` separates cookies, local storage, cache, crash data, and desktop web state.
+Prepared application copies are stored in a `profile-runtime` directory next to this repository. They are local build artifacts and are intentionally ignored by Git.
 
-For every `Isolated` profile, the launcher also ensures its `codex-home\config.toml` contains:
+## Usage
 
-```toml
-cli_auth_credentials_store = "file"
-```
-
-This forces Codex to use the profile-local `auth.json` instead of a shared Windows credential store. Existing configuration is preserved. If an isolated profile explicitly selects another credential store, the launcher stops with an error instead of silently overriding it. Native profiles are not changed.
-
-## Change the profiles
-
-Edit the configuration block near the beginning of `Codex-Profile.ps1`:
+Run these commands from the directory containing `Codex-Profile.ps1`:
 
 ```powershell
-$DefaultProfile = 'Work'
-$Profiles = [ordered]@{
-    Work     = @{ Mode = 'Native'; Description = 'Normal Codex app state; no profile overrides' }
-    Personal = @{ Mode = 'Isolated'; Description = 'Separate personal account and application state' }
-}
+# Launch the default Work profile
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Codex-Profile.ps1 Work
+
+# Launch the isolated Personal profile
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Codex-Profile.ps1 Personal
+
+# Show isolated instances
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Codex-Profile.ps1 -Status
+
+# Install desktop shortcuts for the configured profiles
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Codex-Profile.ps1 -InstallShortcuts
+
+# Send a harmless notification routing test while Personal is closed
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Codex-Profile.ps1 Personal -TestNotification
 ```
 
-Exactly one profile should normally use `Native` mode because every native entry resolves to the same normal Codex state. Additional accounts should use `Isolated`.
+The launcher also accepts `-ProfilesRoot` when a different local profile root is required.
 
-## Create desktop shortcuts
+## Update behavior
 
-Create one shortcut for every configured profile:
+When Codex is updated, the launcher attempts to prepare a matching isolated runtime. If the new app structure is incompatible with the profile patch, it reuses the newest valid isolated runtime instead of modifying the installed app or silently falling back to the shared account. If no valid runtime exists, it stops with an error.
 
-```powershell
-.\Codex-Profile.ps1 -InstallShortcuts
-```
+The launcher also falls back to the executable path of a running native Codex process when AppX registration is temporarily unavailable. These fallbacks keep the two profile data directories separate.
 
-Do not move or rename the script after creating shortcuts; recreate them if you do.
+## Privacy and safety
 
-## Diagnostics
+- Never commit `auth.json`, `CodexProfiles`, `codex-home`, `web-data`, notification logs, or prepared runtimes.
+- Do not place profile data in Git, OneDrive, Dropbox, shared folders, or network drives.
+- Do not run two Personal processes against the same profile directory at the same time.
+- The notification journal records routing events and process metadata, not notification bodies.
+- The launcher does not modify the original installed Codex files; it patches only a copied runtime.
 
-Show running isolated top-level Codex processes:
+## Tests
 
-```powershell
-.\Codex-Profile.ps1 -Status
-```
+The `scripts` directory contains tests for:
 
-The native/default process is deliberately not shown because it has no explicit `--user-data-dir` argument.
+- launcher configuration parsing and idempotent updates;
+- runtime archive copying and integrity;
+- Windows sandbox read/write boundaries.
 
-## Important caveats
+The tests create temporary local fixtures and do not call the model.
 
-- This was verified with Windows package `OpenAI.Codex_26.707.3748.0_x64` but is not a documented, supported multi-profile feature. A future update could change argument handling, environment handling, authentication, or storage layout.
-- Windows still sees every process as the same installed package. Package-scoped settings, notifications, `codex://` protocol activation, shell integration, and OS credential storage may remain shared or route to the wrong profile.
-- Isolated profiles force Codex authentication into their profile-local `auth.json`; keep that file private and never commit it.
-- If browser sign-in returns to the wrong window, temporarily close the other profile, finish sign-in, and reopen both.
-- Do not copy credentials between profile folders or place profile data in Git, OneDrive, Dropbox, shared folders, or network drives.
-- Do not run the same isolated profile concurrently against the same files. Chromium and SQLite expect single-profile ownership.
+## Fork relationship
 
-## What was verified
-
-On July 10, 2026, a probe launched the packaged `app\ChatGPT.exe` with `CODEX_HOME` and `--user-data-dir` overrides while the normal Codex app was running. Windows created a second top-level process. Its Chromium children used the isolated web-data directory, and its Codex backend initialized config, databases, plugins, and skills under the isolated `CODEX_HOME`.
-
-OpenAI's public documentation does not currently document `--user-data-dir` as a supported Codex desktop profile feature. Treat this launcher as an update-sensitive workaround.
+This repository uses the original project as `upstream` and this personal fork as `origin`. Changes intended for the original project should be proposed through a pull request rather than pushed to the upstream repository.
