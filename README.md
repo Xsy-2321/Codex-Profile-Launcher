@@ -1,7 +1,5 @@
 # Codex Profile Launcher for Windows
 
-This is a personal fork of [phoem/Codex-Profile-Launcher](https://github.com/phoem/Codex-Profile-Launcher), extended to run a normal Codex account alongside an isolated Personal account on Windows.
-
 [中文说明 / Chinese documentation](README.zh-CN.md)
 
 > This is an unofficial, update-sensitive workaround that relies on the internal structure of the Codex Windows app. It is not an official multi-account feature.
@@ -78,7 +76,3 @@ The `scripts` directory contains tests for:
 - Windows sandbox read/write boundaries.
 
 The tests create temporary local fixtures and do not call the model.
-
-## Fork relationship
-
-This repository uses the original project as `upstream` and this personal fork as `origin`. Changes intended for the original project should be proposed through a pull request rather than pushed to the upstream repository.

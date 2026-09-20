@@ -1,7 +1,5 @@
 # Codex 双账号启动器（Windows）
 
-这是 [phoem/Codex-Profile-Launcher](https://github.com/phoem/Codex-Profile-Launcher) 的个人 Fork，用于在 Windows 上同时运行普通 Codex 账号和隔离的 Personal 副账号。
-
 [English documentation / 英文说明](README.md)
 
 > 这是依赖 Codex Windows 应用内部结构的非官方方案，后续应用更新可能需要调整，不属于官方多账号功能。
@@ -78,7 +76,3 @@ Codex 更新后，启动器会尝试为新版本准备对应的隔离运行副�
 - Windows 沙盒读写边界测试。
 
 测试只创建临时本地夹具，不调用模型。
-
-## Fork 关系
-
-本仓库将原项目配置为 `upstream`，将个人 Fork 配置为 `origin`。如果未来有适合贡献给原项目的改动，应通过 Pull Request 提交，而不是直接向上游仓库推送。
