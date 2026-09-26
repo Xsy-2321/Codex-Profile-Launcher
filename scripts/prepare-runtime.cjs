@@ -4,6 +4,40 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const vm = require('node:vm');
 
+function archiveHeaderHash(archive) {
+  const fd = fs.openSync(archive, 'r');
+  try {
+    const prefix = Buffer.alloc(16);
+    if (fs.readSync(fd, prefix, 0, 16, 0) !== 16) throw new Error('Truncated ASAR prefix');
+    const header = Buffer.alloc(prefix.readUInt32LE(12));
+    if (fs.readSync(fd, header, 0, header.length, 16) !== header.length) throw new Error('Truncated ASAR header');
+    return crypto.createHash('sha256').update(header).digest('hex');
+  } finally { fs.closeSync(fd); }
+}
+
+function updateArchiveIntegrity(executable, sourceArchive, patchedArchive) {
+  // Keep Electron's integrity enforcement enabled. Update only the expected
+  // header digest in the copied executable's existing ElectronAsar resource.
+  const before = archiveHeaderHash(sourceArchive);
+  const after = archiveHeaderHash(patchedArchive);
+  const bytes = fs.readFileSync(executable);
+  const marker = Buffer.from('"file":"resources\\\\app.asar"');
+  const markerOffset = bytes.indexOf(marker);
+  if (markerOffset < 0) return null; // Older Owl builds have no embedded entry.
+  if (bytes.indexOf(marker, markerOffset + 1) >= 0) throw new Error('Ambiguous ASAR integrity resource');
+  const recordEnd = bytes.indexOf(Buffer.from('}'), markerOffset);
+  if (recordEnd < 0 || recordEnd - markerOffset > 512) throw new Error('Unsupported ASAR integrity resource');
+  const record = JSON.parse('{' + bytes.subarray(markerOffset, recordEnd + 1).toString());
+  if (record.alg.toUpperCase() !== 'SHA256' || record.value !== before) {
+    throw new Error('Embedded ASAR integrity does not match the installed archive');
+  }
+  const offset = bytes.indexOf(Buffer.from(before), markerOffset);
+  if (offset < markerOffset || offset + 64 > recordEnd) throw new Error('Cannot locate ASAR integrity digest');
+  bytes.write(after, offset, 64, 'ascii');
+  fs.writeFileSync(executable, bytes);
+  return {offset, before, after};
+}
+
 function patchArchive(source, destination, initialCode) {
   const input = fs.readFileSync(source);
   const header = JSON.parse(input.subarray(16, 16 + input.readUInt32LE(12)));
@@ -13,7 +47,9 @@ function patchArchive(source, destination, initialCode) {
   if (names.length !== 1) throw new Error('Unsupported app: bootstrap is not unique');
   const entry = build[names[0]];
   const old = input.subarray(base + Number(entry.offset), base + Number(entry.offset) + entry.size).toString();
-  const hook = /([\w]+)\.app\.setAppUserModelId\(([\w]+)\.r\(([\w]+)\)\)/g;
+  // Rollup emits either a namespace call (old builds) or a direct function
+  // call (new builds). Match only the known one-argument identity expression.
+  const hook = /[\w$]+\.app\.setAppUserModelId\([\w$]+(?:\.[\w$]+)?\([\w$]+\)\)/g;
   if ([...old.matchAll(hook)].length !== 1) throw new Error('Unsupported app: notification identity hook changed');
   const changed = initialCode + '\n' + old.replace(hook, '$& ,require(process.resourcesPath+"/profile-bootstrap.cjs").configure()');
   // The original hook is in a comma expression, so the injected call remains in that expression.
@@ -66,11 +102,13 @@ function prepare(source, target, profileRoot, label) {
     'require(process.resourcesPath+"/profile-bootstrap.cjs").environment();');
   fs.cpSync(source,target,{recursive:true,dereference:true,filter:p=>p!==path.join(source,'resources','app.asar')});
   fs.renameSync(scratch,path.join(target,'resources','app.asar'));
+  const archiveIntegrity = updateArchiveIntegrity(path.join(target,'ChatGPT.exe'),
+    path.join(source,'resources','app.asar'),path.join(target,'resources','app.asar'));
   fs.copyFileSync(path.join(__dirname,'profile-bootstrap.cjs'),path.join(target,'resources','profile-bootstrap.cjs'));
   fs.writeFileSync(path.join(target,'resources','profile-identity.json'),JSON.stringify(identity,null,2));
-  fs.writeFileSync(path.join(target,'profile-runtime.json'),JSON.stringify({source,...identity,builtAt:new Date().toISOString()},null,2));
+  fs.writeFileSync(path.join(target,'profile-runtime.json'),JSON.stringify({source,...identity,archiveIntegrity,builtAt:new Date().toISOString()},null,2));
   console.log(JSON.stringify({executable:path.join(target,'ChatGPT.exe'),...identity}));
 }
 
 if(require.main===module){try{prepare(...process.argv.slice(2));}catch(e){console.error(e.message);process.exitCode=1;}}
-module.exports={patchArchive,prepare};
+module.exports={patchArchive,prepare,archiveHeaderHash,updateArchiveIntegrity};

@@ -19,3 +19,6 @@ profile-runtime/
 config-test-*/
 sandbox-test-*/
 *.log
+
+# Stable, locally copied shortcut icon
+shortcut-assets/

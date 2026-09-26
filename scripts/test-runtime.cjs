@@ -23,8 +23,21 @@ for(const [name,a] of before){
   }else assert.deepEqual(b.data,a.data,name);
 }
 assert.equal(patched,1);
-for(const name of ['ChatGPT.exe','resources/codex.exe','resources/codex-windows-sandbox-setup.exe']){
+const originalExe=fs.readFileSync(path.join(meta.source,'ChatGPT.exe'));
+const runtimeExe=fs.readFileSync(path.join(runtime,'ChatGPT.exe'));
+if(meta.archiveIntegrity){
+  const {archiveHeaderHash}=require('./prepare-runtime.cjs');
+  const {offset,before:originalHash,after:patchedHash}=meta.archiveIntegrity;
+  assert.equal(originalHash,archiveHeaderHash(path.join(meta.source,'resources/app.asar')));
+  assert.equal(patchedHash,archiveHeaderHash(path.join(runtime,'resources/app.asar')));
+  assert.equal(originalExe.subarray(offset,offset+64).toString(),originalHash);
+  assert.equal(runtimeExe.subarray(offset,offset+64).toString(),patchedHash);
+  const normalized=Buffer.from(runtimeExe);
+  normalized.write(originalHash,offset,64,'ascii');
+  assert.deepEqual(normalized,originalExe,'Only the ASAR resource digest may differ in ChatGPT.exe');
+}else assert.deepEqual(runtimeExe,originalExe,'ChatGPT.exe');
+for(const name of ['resources/codex.exe','resources/codex-windows-sandbox-setup.exe']){
   const hash=root=>crypto.createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex');
   assert.equal(hash(runtime),hash(meta.source),name);
 }
-console.log(`PASS: ${before.size} archive entries checked; only bootstrap differs; application, CLI and sandbox helper binaries match the installed package.`);
+console.log(`PASS: ${before.size} archive entries checked; only bootstrap differs; executable differs only by its declared ASAR digest; CLI and sandbox helper binaries match the installed package.`);

@@ -134,6 +134,77 @@ function Resolve-ProfileName([string]$Name) {
     throw "Unknown profile '$Name'. Configured profiles: $available"
 }
 
+function Get-CodexActivationId([string]$Executable) {
+    $packageRoot = Split-Path (Split-Path $Executable -Parent) -Parent
+    $packageName = Split-Path $packageRoot -Leaf
+    if ($packageName -notmatch '^OpenAI\.Codex_[\d.]+_[^_]+_[^_]*_([A-Za-z0-9]+)$') {
+        throw 'Native mode requires the installed OpenAI.Codex package.'
+    }
+    $family = 'OpenAI.Codex_' + $Matches[1]
+    [xml]$manifest = Get-Content -Raw -LiteralPath (Join-Path $packageRoot 'AppxManifest.xml')
+    $applications = @($manifest.Package.Applications.Application | Where-Object {
+        ([string]$_.Executable).Replace('/', '\') -ieq 'app\ChatGPT.exe'
+    })
+    if ($applications.Count -ne 1 -or -not $applications[0].Id) {
+        throw 'Cannot identify the registered desktop application in the package manifest.'
+    }
+    return $family + '!' + $applications[0].Id
+}
+
+function Start-NativeCodex([string]$Executable) {
+    $activationId = Get-CodexActivationId -Executable $Executable
+    # Launch through Windows application activation. Starting ChatGPT.exe
+    # directly can omit the MSIX package identity required by newer builds.
+    if (-not ('CodexPackageActivation' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CodexPackageActivation {
+    [ComImport, Guid("2E941141-7F97-4756-BA1D-9DECDE894A3D"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IApplicationActivationManager {
+        [PreserveSig] int ActivateApplication(
+            [MarshalAs(UnmanagedType.LPWStr)] string appUserModelId,
+            [MarshalAs(UnmanagedType.LPWStr)] string arguments,
+            uint options, out uint processId);
+        [PreserveSig] int ActivateForFile(IntPtr appUserModelId, IntPtr items, IntPtr verb, out uint processId);
+        [PreserveSig] int ActivateForProtocol(IntPtr appUserModelId, IntPtr items, out uint processId);
+    }
+    public static int Launch(string appUserModelId) {
+        object instance = Activator.CreateInstance(Type.GetTypeFromCLSID(
+            new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")));
+        try {
+            uint processId;
+            int result = ((IApplicationActivationManager)instance).ActivateApplication(
+                appUserModelId, null, 0, out processId);
+            Marshal.ThrowExceptionForHR(result);
+            return checked((int)processId);
+        } finally {
+            Marshal.FinalReleaseComObject(instance);
+        }
+    }
+}
+'@
+    }
+    $appProcessId = [CodexPackageActivation]::Launch($activationId)
+    return Get-Process -Id $appProcessId -ErrorAction Stop
+}
+
+function Get-CodexShortcutIcon {
+    $installedExe = Get-CodexExecutable
+    $sourceIcon = Join-Path (Split-Path $installedExe -Parent) 'resources\icon-chatgpt.ico'
+    if (-not (Test-Path -LiteralPath $sourceIcon -PathType Leaf)) {
+        throw "Cannot find the installed app icon: $sourceIcon"
+    }
+    # A Store update removes the old version directory. Keep shortcut icons
+    # outside WindowsApps so that the shortcuts survive those updates.
+    $assetDirectory = Join-Path $PSScriptRoot 'shortcut-assets'
+    New-Item -ItemType Directory -Path $assetDirectory -Force | Out-Null
+    $icon = Join-Path $assetDirectory 'codex.ico'
+    Copy-Item -LiteralPath $sourceIcon -Destination $icon -Force
+    return $icon
+}
+
 function Get-ProfilePaths([string]$Name, [string]$Root) {
     $profileRoot = Join-Path $Root $Name.ToLowerInvariant()
     [pscustomobject]@{
@@ -168,7 +239,7 @@ function Get-IsolatedRuntime([string]$InstalledExe, [string]$Name, [string]$Prof
     $packageName = Split-Path (Split-Path $source -Parent) -Leaf
     if ($packageName -notmatch '^OpenAI\.Codex_([\d.]+)_') { throw 'Cannot identify installed Codex version.' }
     $version = $Matches[1]
-    $suffix = if ($Name -eq 'Personal') { '-v1' } else { "-$Name-v1" }
+    $suffix = if ($Name -eq 'Personal') { '-v2' } else { "-$Name-v2" }
     $runtime = Join-Path $runtimeBase ($version + $suffix)
     $manifest = Join-Path $runtime 'profile-runtime.json'
     if (-not (Test-Path -LiteralPath $manifest)) {
@@ -422,13 +493,13 @@ function Install-CodexShortcuts([string]$Root) {
     $shell = New-Object -ComObject WScript.Shell
     $scriptPath = $PSCommandPath
     $powershell = (Get-Command powershell.exe -ErrorAction Stop).Source
-    $icon = Get-CodexExecutable
+    $icon = Get-CodexShortcutIcon
 
     foreach ($name in $Profiles.Keys) {
         $linkPath = Join-Path $desktop "Codex - $name.lnk"
         $shortcut = $shell.CreateShortcut($linkPath)
         $shortcut.TargetPath = $powershell
-        $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Profile `"$name`" -ProfilesRoot `"$Root`""
+        $shortcut.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`" -Profile `"$name`" -ProfilesRoot `"$Root`""
         $shortcut.WorkingDirectory = [Environment]::GetFolderPath('UserProfile')
         $shortcut.IconLocation = "$icon,0"
         $shortcut.Description = "Launch Codex profile: $name ($($Profiles[$name].Mode))"
@@ -489,7 +560,7 @@ $profileConfig = $Profiles[$Profile]
 $exe = Get-CodexExecutable -AllowRuntimeFallback:($profileConfig.Mode -eq 'Isolated')
 
 if ($profileConfig.Mode -eq 'Native') {
-    $process = Start-Process -FilePath $exe -PassThru
+    $process = Start-NativeCodex -Executable $exe
     Write-Host "Launched Codex profile '$Profile' in Native mode (PID $($process.Id))"
     Write-Host '  No CODEX_HOME or --user-data-dir override was applied.'
 }

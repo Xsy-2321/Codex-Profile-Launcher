@@ -55,6 +55,10 @@ The launcher also accepts `-ProfilesRoot` when a different local profile root is
 
 ## Update behavior
 
+Work launches through Windows package activation so the app receives its MSIX package identity. Desktop shortcut icons are copied to `shortcut-assets` instead of pointing into a versioned WindowsApps directory. Run `-InstallShortcuts` once to repair existing shortcut icons.
+
+Personal uses its copied `resources/codex.exe` backend through `CODEX_CLI_PATH`, keeping it independent of the installed app's registered MSIX core. The v2 runtime supports both known notification bootstrap layouts. For builds with embedded ASAR integrity, it updates the copied executable's expected archive-header digest while leaving integrity enforcement enabled. This makes the copy locally modified; the installed application's files remain untouched. The runtime integrity test verifies that only the bootstrap and this 64-byte digest differ.
+
 When Codex is updated, the launcher attempts to prepare a matching isolated runtime. If the new app structure is incompatible with the profile patch, it reuses the newest valid isolated runtime instead of modifying the installed app or silently falling back to the shared account. If no valid runtime exists, it stops with an error.
 
 The launcher also falls back to the executable path of a running native Codex process when AppX registration is temporarily unavailable. These fallbacks keep the two profile data directories separate.
@@ -72,6 +76,7 @@ The launcher also falls back to the executable path of a running native Codex pr
 The `scripts` directory contains tests for:
 
 - launcher configuration parsing and idempotent updates;
+- old/new bootstrap compatibility and rejection of mismatched integrity records;
 - runtime archive copying and integrity;
 - Windows sandbox read/write boundaries.
 

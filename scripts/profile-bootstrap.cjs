@@ -22,6 +22,9 @@ function resetStartupPage(){
 exports.environment=()=>{
   process.env.CODEX_HOME=path.join(identity.profileRoot,'codex-home');
   process.env.CODEX_ELECTRON_USER_DATA_PATH=path.join(identity.profileRoot,'web-data');
+  // This is an unpackaged profile-owned copy. Use its bundled backend rather
+  // than the newer registered MSIX core, which requires the main app identity.
+  if(process.platform==='win32')process.env.CODEX_CLI_PATH=path.join(process.resourcesPath,'codex.exe');
   // Keep the release behavior; notification identity is configured explicitly.
   delete process.env.BUILD_FLAVOR;
   if(process.argv.includes('--profile-fresh-start'))resetStartupPage();
@@ -56,6 +59,10 @@ exports.configure=()=>{
   const shortcut=path.join(process.env.APPDATA,'Microsoft','Windows','Start Menu','Programs','Codex - '+identity.label+'.lnk');
   if(!fs.existsSync(shortcut)) throw new Error('Run Register-ProfileNotifications.ps1 before launching this runtime');
   record('identity',{appId:identity.appId,clsid:app.toastActivatorCLSID,executable:process.execPath,shortcut});
+  app.whenReady().then(()=>{
+    record('runtime-ready',{version:app.getVersion(),name:app.getName(),userData:app.getPath('userData'),codexHome:process.env.CODEX_HOME,cliPath:process.env.CODEX_CLI_PATH});
+    if(process.argv.includes('--profile-runtime-check'))app.exit(0);
+  });
   // Trace the same native notifications used for real approvals, without recording message contents.
   const originalShow=Notification.prototype.show;
   Notification.prototype.show=function(...args){
